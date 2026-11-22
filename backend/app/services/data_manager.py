@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -253,6 +254,67 @@ def list_exports() -> list[dict[str, Any]]:
         if record:
             records.append(record)
     return records
+
+
+# ========== 过滤类型校验报告 ==========
+
+
+def write_filter_report(report_id: str, report: dict[str, Any]) -> None:
+    """持久化过滤类型校验报告，供格式化消费和历史判定对比。"""
+    report = dict(report)
+    report.setdefault("created_at", _now_iso())
+    _write_json(DATA_ROOT / "filter_reports" / f"{report_id}.json", report)
+
+
+def read_filter_report(report_id: str) -> dict[str, Any]:
+    if not report_id:
+        return {}
+    return _read_json(DATA_ROOT / "filter_reports" / f"{report_id}.json", {})
+
+
+def list_filter_reports(rule_no: str | None = None,
+                        batch_fingerprint: str | None = None,
+                        template_no: str | None = None) -> list[dict[str, Any]]:
+    """按规则、样本批次或模板筛选历史报告，按生成时间升序返回。"""
+    _ensure_dir(DATA_ROOT / "filter_reports")
+    records: list[dict[str, Any]] = []
+    for path in sorted(DATA_ROOT.glob("filter_reports/*.json")):
+        report = _read_json(path)
+        if not report:
+            continue
+        if rule_no and report.get("rule_no") != rule_no:
+            continue
+        if batch_fingerprint and report.get("batch_fingerprint") != batch_fingerprint:
+            continue
+        if template_no and report.get("template_no") != template_no:
+            continue
+        records.append(report)
+    records.sort(key=lambda item: (str(item.get("created_at", "")), str(item.get("report_id", ""))))
+    return records
+
+
+# ========== 模板版本绑定 ==========
+
+
+def write_template_binding(template_no: str, template_version: str,
+                           binding: dict[str, Any]) -> None:
+    """按“模板编号/版本”保存一次映射解析结果，供换版后查回。"""
+    safe_no = re.sub(r"[^0-9A-Za-z一-龥_.-]+", "_", template_no or "template")[:48]
+    safe_version = re.sub(r"[^0-9A-Za-z一-龥_.-]+", "_", template_version or "v1")[:48]
+    _write_json(DATA_ROOT / "template_bindings" / safe_no / f"{safe_version}.json", binding)
+
+
+def list_template_bindings(template_no: str) -> list[dict[str, Any]]:
+    safe_no = re.sub(r"[^0-9A-Za-z一-龥_.-]+", "_", template_no or "template")[:48]
+    directory = DATA_ROOT / "template_bindings" / safe_no
+    if not directory.exists():
+        return []
+    bindings = []
+    for path in sorted(directory.glob("*.json")):
+        data = _read_json(path)
+        if data:
+            bindings.append(data)
+    return bindings
 
 
 # ========== 模块数据快照 ==========
